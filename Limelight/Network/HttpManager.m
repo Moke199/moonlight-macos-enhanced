@@ -223,7 +223,8 @@ static const NSString* HTTPS_PORT = @"47984";
         typeof(self) strongSelf = weakSelf;
         
         if (error != NULL) {
-            Log(LOG_D, @"Connection error: %@", error);
+            // 提升到 WARN 并带上 URL：主机被判定为离线时，这里是唯一能看到真实失败原因的地方
+            Log(LOG_W, @"Connection error for %@: %@", request.request.URL, error);
             requestError = error;
         }
         else {
@@ -341,13 +342,17 @@ static const NSString* HTTPS_PORT = @"47984";
 }
 
 - (NSURLRequest *)newServerInfoRequest:(bool)fastFail {
-    if (_serverCert == nil) {
-        // Use HTTP if the cert is not pinned yet
+    // 发现轮询（fastFail）一律走无认证的 HTTP 端口：
+    // serverinfo 本身不需要客户端证书，而走 HTTPS 时只要主机端证书与已固定的
+    // serverCert 对不上（重装 Sunshine、主机重装系统、切换主机软件等），TLS 阶段
+    // 就会失败，表现为已配对主机永远探测超时、一直显示离线。
+    if (_serverCert == nil || fastFail) {
+        // Use HTTP if the cert is not pinned yet, or when polling for availability
         return [self newHttpServerInfoRequest:fastFail];
     }
     
     NSString* urlString = [NSString stringWithFormat:@"%@/serverinfo?uniqueid=%@", _baseHTTPSURL, _clientUniqueId];
-    return [self createRequestFromString:urlString timeout:(fastFail ? SHORT_TIMEOUT_SEC : NORMAL_TIMEOUT_SEC)];
+    return [self createRequestFromString:urlString timeout:NORMAL_TIMEOUT_SEC];
 }
 
 - (NSURLRequest *)newHttpServerInfoRequest:(bool)fastFail {
