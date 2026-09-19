@@ -258,7 +258,7 @@ class MicrophoneManager: ObservableObject {
         // AVAudioIONode.audioUnit 在节点尚未挂载到 engine 时会返回 nil（例如 engine 启动前调用），
         // 这里不能强解包，否则会直接崩溃。
         guard let audioUnit = inputNode.audioUnit else {
-            logWarning("[audio] 输入节点尚未就绪，跳过输入设备绑定")
+            NSLog("Audio input node is not ready; skipping input device binding")
             return
         }
 
@@ -271,7 +271,7 @@ class MicrophoneManager: ObservableObject {
             UInt32(MemoryLayout<AudioDeviceID>.size)
         )
         if status != noErr {
-            logWarning("[audio] 绑定输入设备失败，OSStatus=\(status)")
+            NSLog("Failed to bind audio input device, OSStatus=\(status)")
         }
     }
 }
