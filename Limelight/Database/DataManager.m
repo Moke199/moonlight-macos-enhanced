@@ -79,6 +79,12 @@
         // Add a new persistent managed object if one doesn't exist
         Host* parent = [self getHostForTemporaryHost:host withHostRecords:[self fetchRecords:@"Host"]];
         if (parent == nil) {
+            // 没有 UUID 且匹配不到已有记录时不要新建记录：这类对象通常是 mDNS 刚发现的
+            // 临时主机，写进去只会产生无 UUID 的空壳记录并被清理逻辑反复删除，污染数据库。
+            if (host.uuid.length == 0) {
+                return;
+            }
+
             NSEntityDescription* entity = [NSEntityDescription entityForName:@"Host" inManagedObjectContext:self->_managedObjectContext];
             parent = [[Host alloc] initWithEntity:entity insertIntoManagedObjectContext:self->_managedObjectContext];
         }
@@ -220,7 +226,11 @@
             if (tempHost.address != nil && host.address != nil && [tempHost.address isEqualToString:host.address]) {
                 return host;
             }
-            if (tempHost.name != nil && host.name != nil && [tempHost.name isEqualToString:host.name]) {
+            // 名称匹配排除 mDNS 的 .local. 临时主机名：它与记录里的正式主机名不同源，
+            // 用它匹配会把「同一台主机的两条记录」错误地合并到一起。
+            if (tempHost.name.length > 0 && host.name.length > 0 &&
+                ![tempHost.name hasSuffix:@".local."] &&
+                [tempHost.name isEqualToString:host.name]) {
                 return host;
             }
         }

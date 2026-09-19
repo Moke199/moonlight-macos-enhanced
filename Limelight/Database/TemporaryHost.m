@@ -76,9 +76,16 @@
     }
     parentHost.name = self.name;
     [parentHost setValue:self.customName forKey:@"customName"];
-    parentHost.uuid = self.uuid;
+    // UUID 与配对状态不能在数据缺失时覆盖已有记录：
+    // mDNS 刚发现的临时主机只带地址和 .local. 主机名，既没有 UUID 也没有配对状态，
+    // 一旦用它覆盖，记录会丢掉 UUID（随后被清理逻辑当作无效记录删除）以及已配对状态。
+    if (self.uuid.length > 0) {
+        parentHost.uuid = self.uuid;
+    }
     parentHost.serverCodecModeSupport = self.serverCodecModeSupport;
-    parentHost.pairState = [NSNumber numberWithInt:self.pairState];
+    if (self.pairState != PairStateUnknown) {
+        parentHost.pairState = [NSNumber numberWithInt:self.pairState];
+    }
 }
 
 - (NSString *)displayName {

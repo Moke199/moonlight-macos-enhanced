@@ -422,9 +422,14 @@ static dispatch_once_t gUnpairedObservationOnceToken;
         }
     }
 
-    // Persist state changes (including offline) so UI stays in sync
-    DataManager *dataManager = [[DataManager alloc] init];
-    [dataManager updateHost:_host];
+    // Persist state changes (including offline) so UI stays in sync.
+    // 只持久化已经拿到 UUID 的主机：mDNS 刚发现的临时对象没有 UUID，
+    // 用它们写库会走「按 mac / 地址 / 名称兜底匹配」，从而把已有记录的 UUID 覆盖为空，
+    // 该记录随后会被清理逻辑删除，表现为「配对过的主机凭空消失」。
+    if (_host.uuid.length > 0) {
+        DataManager *dataManager = [[DataManager alloc] init];
+        [dataManager updateHost:_host];
+    }
 
     // Broadcast latency update for UI (SettingsModel)
     __weak typeof(self) weakSelf2 = self;
