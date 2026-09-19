@@ -8,6 +8,7 @@
 
 #import "CryptoManager.h"
 #import "mkcert.h"
+#import "Logger.h"
 
 #include <openssl/sha.h>
 #include <openssl/x509.h>
@@ -202,9 +203,56 @@ static NSData* p12 = nil;
     return signedData;
 }
 
+// 客户端证书的存储目录。macOS 上不能用 ~/Documents：
+// 该目录受 TCC「文稿文件夹」隐私保护，未授权时 writeToFile 会静默失败，
+// 导致 keyPairExists 永远为 NO，每次串流启动都会重新生成客户端证书，
+// 已配对的主机会因为客户端证书变更而拒绝串流（client not authorized）。
+// ~/Library/Application Support 不受 TCC 限制，且本 app 的数据库、日志
+// 均已在此目录下正常读写。
++ (NSString *)cryptoStorageDirectory {
+#if TARGET_OS_TV
+    return nil;
+#else
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    NSString *base = paths.firstObject;
+    if (base.length == 0) {
+        return nil;
+    }
+
+    NSString *dir = [base stringByAppendingPathComponent:@"Moonlight"];
+    NSError *dirError = nil;
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:&dirError];
+    if (dirError != nil) {
+        Log(LOG_E, @"无法创建证书存储目录 %@: %@", dir, dirError.localizedDescription);
+        return nil;
+    }
+    return dir;
+#endif
+}
+
 + (NSData*) readCryptoObject:(NSString*)item {
 #if TARGET_OS_TV
     return [[NSUserDefaults standardUserDefaults] dataForKey:item];
+#elif TARGET_OS_OSX
+    NSString *dir = [self cryptoStorageDirectory];
+    NSData *data = nil;
+    if (dir != nil) {
+        data = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:item]];
+    }
+
+    // 一次性迁移：旧版本把证书写在 ~/Documents（受 TCC 保护，写入经常静默
+    // 失败）。老文件可读且新位置缺失时，搬家到 Application Support。
+    if (data == nil) {
+        NSArray *legacyPaths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *legacyFile = [legacyPaths.firstObject stringByAppendingPathComponent:item];
+        NSData *legacyData = [NSData dataWithContentsOfFile:legacyFile];
+        if (legacyData.length > 0) {
+            Log(LOG_I, @"从旧位置迁移证书文件 %@", item);
+            data = legacyData;
+            [self writeCryptoObject:item data:legacyData];
+        }
+    }
+    return data;
 #else
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *documentsDirectory = [paths objectAtIndex:0];
@@ -216,6 +264,19 @@ static NSData* p12 = nil;
 + (void) writeCryptoObject:(NSString*)item data:(NSData*)data {
 #if TARGET_OS_TV
     [[NSUserDefaults standardUserDefaults] setObject:data forKey:item];
+#elif TARGET_OS_OSX
+    NSString *dir = [self cryptoStorageDirectory];
+    if (dir == nil) {
+        Log(LOG_E, @"证书存储目录不可用，无法写入 %@", item);
+        return;
+    }
+
+    NSError *error = nil;
+    if (![data writeToFile:[dir stringByAppendingPathComponent:item] options:NSDataWritingAtomic error:&error]) {
+        // 写入失败绝不能静默：否则 keyPairExists 会读不到文件，串流启动时
+        // 会重新生成客户端证书，导致已配对主机拒绝连接。
+        Log(LOG_E, @"写入证书文件 %@ 失败: %@", item, error.localizedDescription);
+    }
 #else
     NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *documentsDirectory = [paths objectAtIndex:0];
