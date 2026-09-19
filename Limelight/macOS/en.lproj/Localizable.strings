@@ -773,3 +773,8 @@
 "Clipboard Sync detail" = "Automatically syncs text and one image while this stream owns clipboard sync.";
 "Clipboard Sync Foundation detail" = "Available for Foundation Sunshine hosts. Supported hosts default to Auto Sync, and unsupported hosts simply ignore it.";
 "Auto Sync" = "Auto Sync";
+"Quit App" = "Quit App";
+"CoreHID Permission Required" = "CoreHID Permission Required";
+"CoreHID Permission Alert Message" = "CoreHID needs Input Monitoring to deliver high-polling mouse input. Moonlight is currently using the compatibility path. Grant access in System Settings, then re-enter the stream.";
+"Open Input Monitoring" = "Open Input Monitoring";
+"Later" = "Later";

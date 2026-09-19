@@ -772,3 +772,9 @@
 "Clipboard Sync detail" = "当当前串流会话持有剪贴板同步控制权时，自动同步文本和单张图片。";
 "Clipboard Sync Foundation detail" = "此功能适用于 Foundation Sunshine 主机。受支持的主机会默认启用自动同步，不支持的主机会直接忽略。";
 "Auto Sync" = "自动同步";
+"Frame Rate" = "帧率";
+"Match Display" = "跟随屏幕";
+"CoreHID Permission Required" = "需要输入监控权限";
+"CoreHID Permission Alert Message" = "CoreHID 需要输入监控权限才能提供高回报率鼠标输入。Moonlight 当前正在使用兼容路径。请在系统设置中授予权限，然后重新进入串流。";
+"Open Input Monitoring" = "打开输入监控设置";
+"Later" = "稍后";
