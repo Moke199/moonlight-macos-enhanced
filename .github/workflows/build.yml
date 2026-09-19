@@ -108,6 +108,22 @@ jobs:
           exit 1
         fi
 
+    - name: Ad-hoc codesign ${{ matrix.variant }} app bundle
+      run: |
+        # Ad-hoc 签名给 app 一个稳定的代码身份：macOS 15+ 的本地网络等 TCC 隐私权限
+        # 依赖签名身份记录授权状态，完全无签名的 app 会出现「系统设置开关已开但
+        # 底层记录仍为拒绝」的死锁（Apple FB15568200）。不使用 --deep：老式版本化
+        # framework（OpenSSL.framework）会触发 Code Signing internal error，
+        # 必须先签嵌套 framework，再签主 bundle。
+        APP="build/Build/Products/Release/Moonlight.app"
+        find "$APP/Contents/Frameworks" -maxdepth 1 -name "*.framework" \
+          -exec codesign --force -s - {} \;
+        codesign --force -s - "$APP/Contents/Library/LaunchServices/std.skyhua.MoonlightMac.AwdlPrivilegedHelper"
+        codesign --force -s - "$APP"
+        echo "签名验证："
+        codesign --verify --deep "$APP"
+        codesign -dv "$APP" 2>&1 | grep -E "Signature=|Identifier="
+
     - name: Package ${{ matrix.variant }} app bundle
       run: |
         mkdir -p dist/app
@@ -266,6 +282,19 @@ jobs:
           echo "Universal helper binary missing expected slices"
           exit 1
         fi
+
+    - name: Ad-hoc codesign universal app bundle
+      run: |
+        # universal 合并时 lipo -create 会重建每个 Mach-O，单架构阶段写入的签名
+        # 全部失效，所以这里必须对合并结果重新做一遍完整 ad-hoc 签名。
+        APP="dist/universal/Moonlight.app"
+        find "$APP/Contents/Frameworks" -maxdepth 1 -name "*.framework" \
+          -exec codesign --force -s - {} \;
+        codesign --force -s - "$APP/Contents/Library/LaunchServices/std.skyhua.MoonlightMac.AwdlPrivilegedHelper"
+        codesign --force -s - "$APP"
+        echo "签名验证："
+        codesign --verify --deep "$APP"
+        codesign -dv "$APP" 2>&1 | grep -E "Signature=|Identifier="
 
     - name: Create universal DMG
       run: |
