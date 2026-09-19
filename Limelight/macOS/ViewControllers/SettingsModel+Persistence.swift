@@ -557,8 +557,8 @@ extension SettingsModel {
     if remoteResolutionEnabled {
       if selectedRemoteResolution == .zero {
         if let w = remoteCustomResWidth, let h = remoteCustomResHeight, w > 0, h > 0 {
-          remoteResolutionWidth = Int(w)
-          remoteResolutionHeight = Int(h)
+          remoteResolutionWidth = Self.safeInt(w, clampedTo: Self.customResolutionRange)
+          remoteResolutionHeight = Self.safeInt(h, clampedTo: Self.customResolutionRange)
         }
       } else {
         remoteResolutionWidth = Int(selectedRemoteResolution.width)
@@ -570,7 +570,7 @@ extension SettingsModel {
     if remoteFpsEnabled {
       if selectedRemoteFps == .zero {
         if let v = remoteCustomFps, v > 0 {
-          remoteFpsRate = Int(v)
+          remoteFpsRate = Self.safeInt(v, clampedTo: Self.customFpsRange)
         }
       } else {
         remoteFpsRate = selectedRemoteFps

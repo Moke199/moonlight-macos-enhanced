@@ -191,12 +191,10 @@ struct OfflineHostOverlayView: View {
                         isWaking = true
                         onWake()
 
-                        // Reset waking state after a delay if still offline
+                        // 唤醒请求发出后如果主机仍未上线，必须恢复按钮可用状态，
+                        // 否则 isWaking 会永远保持 true，用户再也无法重新唤醒或刷新。
                         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                            // We don't automatically set isWaking to false here because
-                            // we want to keep the "waking" UI state until the host actually comes online
-                            // or the user cancels. But we can stop the pulse effect visually if desired,
-                            // or just keep it pulsing to show we're waiting.
+                            isWaking = false
                         }
                     }) {
                         HStack {

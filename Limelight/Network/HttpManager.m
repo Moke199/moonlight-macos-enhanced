@@ -610,7 +610,13 @@ static const NSString* HTTPS_PORT = @"47984";
 - (NSArray*)getCertificate:(SecIdentityRef) identity {
     SecCertificateRef certificate = nil;
     
-    SecIdentityCopyCertificate(identity, &certificate);
+    OSStatus status = SecIdentityCopyCertificate(identity, &certificate);
+    if (status != errSecSuccess || certificate == NULL) {
+        // 失败时 certificate 仍为 NULL，若继续走到 CFBridgingRelease 会得到 nil，
+        // 再传给 initWithObjects: 会直接抛 NSInvalidArgumentException 崩溃。
+        Log(LOG_E, @"Failed to copy certificate from identity: %d", (int)status);
+        return @[];
+    }
     
     return [[NSArray alloc] initWithObjects:CFBridgingRelease(certificate), nil];
 }

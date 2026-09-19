@@ -151,7 +151,8 @@ SwitchCommonOutputPacket_t switchRumblePacket;
                 dataSize = 78;
                 offset = 2;
             } else {
-                data[0] = k_EPS5ReportIdBluetoothEffects;
+                // USB 连接下 DualSense 期望 0x02 报告（此处原来误用了蓝牙的 0x31，导致有线震动无效）
+                data[0] = k_EPS5ReportIdUsbEffects;
 
                 dataSize = 48;
                 offset = 1;

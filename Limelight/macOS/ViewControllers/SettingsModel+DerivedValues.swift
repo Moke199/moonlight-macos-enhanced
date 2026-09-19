@@ -1301,10 +1301,25 @@ extension SettingsModel {
     return selectedResolution
   }
 
+  /// 用户自定义分辨率与帧率的合法取值范围。
+  /// 这些数值直接来自可编辑输入框，必须先夹取范围再参与计算。
+  static let customResolutionRange: ClosedRange<Int> = 1...16384
+  static let customFpsRange: ClosedRange<Int> = 1...1000
+
+  /// 把来自输入框的浮点值安全地转换为 Int。
+  /// Int(_:) 在数值越界或为 NaN / 无穷时会触发不可恢复的运行时 trap，
+  /// 而这里的取值全部来自用户可编辑字段，因此先夹取到合法区间。
+  static func safeInt(_ value: CGFloat, clampedTo range: ClosedRange<Int>) -> Int {
+    guard value.isFinite else { return range.lowerBound }
+    if value <= CGFloat(range.lowerBound) { return range.lowerBound }
+    if value >= CGFloat(range.upperBound) { return range.upperBound }
+    return Int(value)
+  }
+
   func effectiveFpsForBitrate() -> Int {
     if selectedFps == .zero {
       if let customFps, customFps > 0 {
-        return Int(customFps)
+        return Self.safeInt(customFps, clampedTo: Self.customFpsRange)
       }
       return Self.defaultFps
     }
@@ -1318,7 +1333,9 @@ extension SettingsModel {
     let res = effectiveResolutionForBitrate()
     let fps = effectiveFpsForBitrate()
     let kbps = Self.getDefaultBitrateKbps(
-      width: Int(res.width), height: Int(res.height), fps: fps, yuv444: enableYUV444)
+      width: Self.safeInt(res.width, clampedTo: Self.customResolutionRange),
+      height: Self.safeInt(res.height, clampedTo: Self.customResolutionRange),
+      fps: fps, yuv444: enableYUV444)
 
     let steps = Self.bitrateSteps(unlocked: unlockMaxBitrate)
     var bitrateIndex = 0

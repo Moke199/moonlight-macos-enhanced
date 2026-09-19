@@ -76,13 +76,22 @@ class MicrophoneManager: ObservableObject {
             guard AudioObjectGetPropertyDataSize(id, &inputScope, 0, nil, &bufSize) == noErr,
                   bufSize > 0 else { continue }
 
-            let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-            defer { bufferList.deallocate() }
-            guard AudioObjectGetPropertyData(id, &inputScope, 0, nil, &bufSize, bufferList) == noErr
+            // kAudioDevicePropertyStreamConfiguration 返回的是一个变长 AudioBufferList，
+            // 实际大小是 sizeof(AudioBufferList) + (n - 1) * sizeof(AudioBuffer)。
+            // 必须按 CoreAudio 报告的字节数分配，否则多 buffer 设备（聚合设备、虚拟声卡）会写越界。
+            let bufferListRawPointer = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(bufSize),
+                alignment: MemoryLayout<AudioBufferList>.alignment
+            )
+            defer { bufferListRawPointer.deallocate() }
+
+            var ioSize = bufSize
+            guard AudioObjectGetPropertyData(id, &inputScope, 0, nil, &ioSize, bufferListRawPointer) == noErr
             else { continue }
 
-            let inputChannels = UnsafeMutableAudioBufferListPointer(bufferList)
-                .reduce(0) { $0 + Int($1.mNumberChannels) }
+            let inputChannels = UnsafeMutableAudioBufferListPointer(
+                bufferListRawPointer.assumingMemoryBound(to: AudioBufferList.self)
+            ).reduce(0) { $0 + Int($1.mNumberChannels) }
             guard inputChannels > 0 else { continue }
 
             // Get UID
@@ -246,8 +255,14 @@ class MicrophoneManager: ObservableObject {
 
     private func setAudioUnitDevice(_ inputNode: AVAudioInputNode, deviceID: AudioDeviceID) {
         var deviceID = deviceID
-        let audioUnit = inputNode.audioUnit!
-        AudioUnitSetProperty(
+        // AVAudioIONode.audioUnit 在节点尚未挂载到 engine 时会返回 nil（例如 engine 启动前调用），
+        // 这里不能强解包，否则会直接崩溃。
+        guard let audioUnit = inputNode.audioUnit else {
+            logWarning("[audio] 输入节点尚未就绪，跳过输入设备绑定")
+            return
+        }
+
+        let status = AudioUnitSetProperty(
             audioUnit,
             kAudioOutputUnitProperty_CurrentDevice,
             kAudioUnitScope_Global,
@@ -255,6 +270,9 @@ class MicrophoneManager: ObservableObject {
             &deviceID,
             UInt32(MemoryLayout<AudioDeviceID>.size)
         )
+        if status != noErr {
+            logWarning("[audio] 绑定输入设备失败，OSStatus=\(status)")
+        }
     }
 }
 

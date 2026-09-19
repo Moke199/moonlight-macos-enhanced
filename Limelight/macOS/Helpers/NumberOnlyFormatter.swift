@@ -38,6 +38,20 @@ class NumberOnlyFormatter: Formatter {
     override func isPartialStringValid(_ partialString: String, newEditingString: AutoreleasingUnsafeMutablePointer<NSString?>?, errorDescription: AutoreleasingUnsafeMutablePointer<NSString?>?) -> Bool {
         // Validate input, only allow numbers and optional dot
         let numberCharacterSet = CharacterSet(charactersIn: "0123456789.")
-        return partialString.rangeOfCharacter(from: numberCharacterSet.inverted) == nil
+        guard partialString.rangeOfCharacter(from: numberCharacterSet.inverted) == nil else {
+            return false
+        }
+
+        // 限制输入长度：这些输入框后续会做 Double -> Int 转换，
+        // 超长数值（例如 99999999999999999999）会直接让转换触发运行时 trap。
+        guard partialString.count <= Self.maximumInputLength else {
+            errorDescription?.pointee = "Input is too long" as NSString
+            return false
+        }
+
+        return true
     }
+
+    /// 允许输入的最大字符数，足以覆盖分辨率、帧率、码率等所有合法取值
+    private static let maximumInputLength = 10
 }

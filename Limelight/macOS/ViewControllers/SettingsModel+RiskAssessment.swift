@@ -53,16 +53,20 @@ extension SettingsModel {
       streamResolutionScaleRatio > 0,
       streamResolutionScaleRatio != 100
     {
-      let scaledWidth = Int(resolution.width) * streamResolutionScaleRatio / 100
-      let scaledHeight = Int(resolution.height) * streamResolutionScaleRatio / 100
+      let scaledWidth =
+        Self.safeInt(resolution.width, clampedTo: Self.customResolutionRange)
+        * streamResolutionScaleRatio / 100
+      let scaledHeight =
+        Self.safeInt(resolution.height, clampedTo: Self.customResolutionRange)
+        * streamResolutionScaleRatio / 100
       resolution = CGSize(
         width: CGFloat((scaledWidth / 8) * 8),
         height: CGFloat((scaledHeight / 8) * 8)
       )
     }
 
-    var width = max(2, Int(resolution.width))
-    var height = max(2, Int(resolution.height))
+    var width = max(2, Self.safeInt(resolution.width, clampedTo: Self.customResolutionRange))
+    var height = max(2, Self.safeInt(resolution.height, clampedTo: Self.customResolutionRange))
     var fps = max(1, effectiveFpsForBitrate())
 
     if remoteResolutionEnabled {
@@ -70,8 +74,8 @@ extension SettingsModel {
         if let remoteCustomResWidth, let remoteCustomResHeight,
           remoteCustomResWidth > 0, remoteCustomResHeight > 0
         {
-          width = Int(remoteCustomResWidth)
-          height = Int(remoteCustomResHeight)
+          width = Self.safeInt(remoteCustomResWidth, clampedTo: Self.customResolutionRange)
+          height = Self.safeInt(remoteCustomResHeight, clampedTo: Self.customResolutionRange)
         }
       } else {
         width = Int(selectedRemoteResolution.width)
@@ -82,7 +86,7 @@ extension SettingsModel {
     if remoteFpsEnabled {
       if selectedRemoteFps == .zero {
         if let remoteCustomFps, remoteCustomFps > 0 {
-          fps = Int(remoteCustomFps)
+          fps = Self.safeInt(remoteCustomFps, clampedTo: Self.customFpsRange)
         }
       } else {
         fps = selectedRemoteFps
