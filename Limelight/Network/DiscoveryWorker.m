@@ -60,6 +60,15 @@ static dispatch_once_t gUnpairedObservationOnceToken;
 - (NSArray*) getHostAddressList {
     NSMutableOrderedSet *orderedSet = [[NSMutableOrderedSet alloc] initWithCapacity:5];
 
+    // 用户手动添加的端点优先探测，保证在 UI 里手动指定的地址能立刻生效，
+    // 而不是被排在过期地址之后（过期地址会先耗尽超时时间）。
+    NSArray<NSString *> *manualEndpoints = [ConnectionEndpointStore manualEndpointsForHost:_host.uuid];
+    for (NSString *endpoint in manualEndpoints) {
+        if (endpoint.length > 0) {
+            [orderedSet addObject:endpoint];
+        }
+    }
+
     // Try the active address first if we have one. This prevents
     // waiting for timeouts on unreachable local addresses when
     // we're connected remotely.
@@ -77,14 +86,6 @@ static dispatch_once_t gUnpairedObservationOnceToken;
     }
     if (_host.ipv6Address != nil) {
         [orderedSet addObject:_host.ipv6Address];
-    }
-
-    // Append manual endpoints from editor
-    NSArray<NSString *> *manualEndpoints = [ConnectionEndpointStore manualEndpointsForHost:_host.uuid];
-    for (NSString *endpoint in manualEndpoints) {
-        if (endpoint.length > 0) {
-            [orderedSet addObject:endpoint];
-        }
     }
 
     return [orderedSet array];
@@ -366,10 +367,12 @@ static dispatch_once_t gUnpairedObservationOnceToken;
     }
 
     if (totalCount > 0) {
+        // 一并输出实际参与探测的地址列表，方便排查「记录里的地址已过期」这类问题
+        NSString *addressList = [filteredAddresses componentsJoinedByString: @", "];
         if (onlineCount > 0) {
-            Log(LOG_I, @"Discovery summary for %@: %d/%d online", _host.name, onlineCount, totalCount);
+            Log(LOG_I, @"Discovery summary for %@: %d/%d online (地址：%@)", _host.name, onlineCount, totalCount, addressList);
         } else {
-            Log(LOG_W, @"Discovery summary for %@: %d online, %d offline", _host.name, onlineCount, offlineCount);
+            Log(LOG_W, @"Discovery summary for %@: %d online, %d offline (地址：%@)", _host.name, onlineCount, offlineCount, addressList);
         }
     }
 

@@ -277,65 +277,115 @@ static BOOL MoonlightShouldAutoDiscoverNewHosts(void) {
     Log(LOG_I, @"All discovery workers stopped");
 }
 
+// 仅按 UUID 匹配无法处理「记录里的地址已过期、mDNS 又拿不到 UUID」的情形：
+// 地址过期 → serverinfo 探测失败 → UUID 永远拿不到 → 新地址永远写不回记录。
+// 这里补充按地址 / 主机名的兜底匹配，用于打破该死循环。
+- (TemporaryHost *) getHostInDiscoveryByAddressOrName:(TemporaryHost *)host {
+    NSString *localAddress = host.localAddress;
+    NSString *shortHostName = host.name ?: @"";
+    if ([shortHostName hasSuffix:@".local."]) {
+        shortHostName = [shortHostName substringToIndex:shortHostName.length - 7];
+    } else if ([shortHostName hasSuffix:@"."]) {
+        shortHostName = [shortHostName substringToIndex:shortHostName.length - 1];
+    }
+
+    @synchronized (_hostQueue) {
+        for (TemporaryHost *discoveredHost in _hostQueue) {
+            if (localAddress.length > 0) {
+                if ([discoveredHost.localAddress isEqualToString:localAddress] ||
+                    [discoveredHost.address isEqualToString:localAddress] ||
+                    [discoveredHost.activeAddress isEqualToString:localAddress]) {
+                    return discoveredHost;
+                }
+            }
+            if (shortHostName.length > 0 && discoveredHost.name.length > 0) {
+                if ([discoveredHost.name caseInsensitiveCompare:shortHostName] == NSOrderedSame) {
+                    return discoveredHost;
+                }
+            }
+        }
+    }
+
+    return nil;
+}
+
+// 把新发现的主机信息合并到已有记录中。
+// 注意：localAddress / externalAddress / ipv6Address 属于自动发现字段，
+// 主机更换 IP 后必须允许被新值覆盖，否则记录会永久停留在一个已不可达的旧地址上。
+// 这里刻意不整块复制 TemporaryHost，避免把不带配对信息的探测结果覆盖到已配对记录上。
+- (void) mergeDiscoveredHost:(TemporaryHost *)host
+            intoExistingHost:(TemporaryHost *)existingHost
+                 updateState:(BOOL)updateState {
+    // 主地址槽位只填空位，避免覆盖用户手动指定的地址
+    if (host.address.length > 0) {
+        BOOL alreadyKnown = [existingHost.address isEqualToString:host.address] ||
+                            [existingHost.localAddress isEqualToString:host.address] ||
+                            [existingHost.externalAddress isEqualToString:host.address] ||
+                            [existingHost.ipv6Address isEqualToString:host.address];
+        if (!alreadyKnown) {
+            if (existingHost.address.length == 0) {
+                existingHost.address = host.address;
+            } else if (existingHost.localAddress.length == 0) {
+                existingHost.localAddress = host.address;
+            } else if (existingHost.externalAddress.length == 0) {
+                existingHost.externalAddress = host.address;
+            } else if (existingHost.ipv6Address.length == 0) {
+                existingHost.ipv6Address = host.address;
+            } else {
+                existingHost.address = host.address;
+            }
+        }
+    }
+
+    // 自动发现字段：允许用最新发现的值覆盖过期地址
+    if (host.localAddress.length > 0 && ![host.localAddress isEqualToString:existingHost.localAddress]) {
+        Log(LOG_I, @"%@ 的本地地址已更新：%@ -> %@", existingHost.name,
+            existingHost.localAddress.length > 0 ? existingHost.localAddress : @"(空)",
+            host.localAddress);
+        existingHost.localAddress = host.localAddress;
+    }
+    if (host.ipv6Address.length > 0 && ![host.ipv6Address isEqualToString:existingHost.ipv6Address]) {
+        existingHost.ipv6Address = host.ipv6Address;
+    }
+    // externalAddress 可能来自本机的 STUN 推断结果，这里保留原来的「只填空位」策略
+    if (host.externalAddress.length > 0 && existingHost.externalAddress.length == 0) {
+        existingHost.externalAddress = host.externalAddress;
+    }
+    if (host.mac.length > 0 && existingHost.mac.length == 0) {
+        existingHost.mac = host.mac;
+    }
+    if (host.serverCert != nil && existingHost.serverCert == nil) {
+        existingHost.serverCert = host.serverCert;
+    }
+
+    // 可用地址以最新发现为准，避免继续把请求打到已经失效的 activeAddress 上
+    if (host.activeAddress.length > 0) {
+        existingHost.activeAddress = host.activeAddress;
+    }
+
+    // UUID 缺失的临时主机探测失败时不要把已有状态降级，避免误报离线
+    if (updateState) {
+        existingHost.state = host.state;
+    } else if (host.state == StateOnline) {
+        existingHost.state = StateOnline;
+    }
+}
+
 - (BOOL) addHostToDiscovery:(TemporaryHost *)host {
     if (host.uuid.length == 0) {
+        // mDNS 发现的主机在 serverinfo 成功之前没有 UUID，先尝试按地址 / 主机名归并到已有记录，
+        // 否则这台主机的新地址永远无法进入记录，探测会一直打在过期地址上。
+        TemporaryHost *matchedHost = [self getHostInDiscoveryByAddressOrName:host];
+        if (matchedHost != nil) {
+            Log(LOG_I, @"按地址 / 主机名归并 mDNS 发现的主机：%@", host.name ?: @"");
+            [self mergeDiscoveredHost:host intoExistingHost:matchedHost updateState:NO];
+        }
         return NO;
     }
     
     TemporaryHost *existingHost = [self getHostInDiscovery:host.uuid];
     if (existingHost != nil) {
-        // NB: Our logic here depends on the fact that we never propagate
-        // the entire TemporaryHost to existingHost. In particular, when mDNS
-        // discovers a PC and we poll it, we will do so over HTTP which will
-        // not have accurate pair state. The fields explicitly copied below
-        // are accurate though.
-        
-        // Update address of existing host
-        if (host.address != nil) {
-            // If this is a new address, try to add it to an empty slot
-            // instead of overwriting the existing address immediately.
-            if (![existingHost.address isEqualToString:host.address] &&
-                ![existingHost.localAddress isEqualToString:host.address] &&
-                ![existingHost.externalAddress isEqualToString:host.address] &&
-                ![existingHost.ipv6Address isEqualToString:host.address]) {
-
-                if (existingHost.address == nil) {
-                    existingHost.address = host.address;
-                }
-                else if (existingHost.localAddress == nil) {
-                    existingHost.localAddress = host.address;
-                }
-                else if (existingHost.externalAddress == nil) {
-                    existingHost.externalAddress = host.address;
-                }
-                else if (existingHost.ipv6Address == nil) {
-                    existingHost.ipv6Address = host.address;
-                }
-                else {
-                    // No empty slots, overwrite the main address
-                    existingHost.address = host.address;
-                }
-            }
-        }
-        if (host.localAddress != nil && ![host.localAddress isEqualToString:host.address]) {
-             if (existingHost.localAddress == nil) {
-                 existingHost.localAddress = host.localAddress;
-             }
-        }
-        if (host.ipv6Address != nil && ![host.ipv6Address isEqualToString:host.address]) {
-             if (existingHost.ipv6Address == nil) {
-                 existingHost.ipv6Address = host.ipv6Address;
-             }
-        }
-        if (host.externalAddress != nil && ![host.externalAddress isEqualToString:host.address]) {
-             if (existingHost.externalAddress == nil) {
-                 existingHost.externalAddress = host.externalAddress;
-             }
-        }
-
-        // Always update active address and state
-        existingHost.activeAddress = host.activeAddress;
-        existingHost.state = host.state;
+        [self mergeDiscoveredHost:host intoExistingHost:existingHost updateState:YES];
         return NO;
     }
     else {
