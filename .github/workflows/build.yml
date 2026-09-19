@@ -24,7 +24,11 @@ jobs:
             archs: 'arm64'
             display_name: Apple Silicon
           - variant: x86_64
-            runner: macos-26-intel
+            # 在 Apple Silicon runner 上交叉编译 x86_64 切片。
+            # macos-26-intel 是 GitHub 上稀缺且性能极弱的 Intel 机器：同一个工程
+            # 实测要 25 分钟，而 arm64 runner 只需 3 分钟。产出 x86_64 机器码
+            # 并不需要 Intel 硬件，交叉编译即可，且能保证两个切片的工具链一致。
+            runner: macos-26
             destination: 'platform=macOS,arch=x86_64'
             archs: 'x86_64'
             display_name: Intel
@@ -46,6 +50,9 @@ jobs:
         xcodebuild -version
         swift --version
         uname -m
+        echo "CPU: $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+        echo "CPU cores: $(sysctl -n hw.ncpu 2>/dev/null || echo unknown)"
+        echo "hw.optional.arm64: $(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)"
         echo "Available schemes:"
         xcodebuild -list -project Moonlight.xcodeproj || true
 
@@ -63,7 +70,7 @@ jobs:
           -derivedDataPath build \
           -destination "${{ matrix.destination }}" \
           ARCHS="${{ matrix.archs }}" \
-          ONLY_ACTIVE_ARCH=YES \
+          ONLY_ACTIVE_ARCH=NO \
           CODE_SIGN_IDENTITY="-" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
