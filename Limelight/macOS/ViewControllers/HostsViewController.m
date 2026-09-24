@@ -931,11 +931,28 @@
 }
 
 - (void)alreadyPaired {
-    self.pairingInProgress = NO;
-    self.pairingAddressInFlight = nil;
-    self.pairingFallbackAddress = nil;
-    self.pairingFallbackAttempted = NO;
-    [self transitionToAppsVCWithHost:self.selectedHost];
+    // PairManager 是后台 NSOperation，此回调可能来自后台线程；
+    // transitionToAppsVCWithHost 会加载 AppKit 视图，必须在主线程执行，
+    // 否则触发 AppKit 主线程断言并在异常展开时 SIGSEGV。
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.pairingInProgress = NO;
+        self.pairingAddressInFlight = nil;
+        self.pairingFallbackAddress = nil;
+        self.pairingFallbackAttempted = NO;
+
+        // 主机端通过认证 HTTPS 查询确认本客户端已配对（PairStatus=1）。
+        // 若本地记录曾被旧版轮询逻辑降级污染，这里顺带修正并落盘。
+        if (self.selectedHost != nil && self.selectedHost.serverCert != nil
+            && self.selectedHost.pairState != PairStatePaired) {
+            self.selectedHost.pairState = PairStatePaired;
+            DataManager *dataManager = [[DataManager alloc] init];
+            [dataManager updateHost:self.selectedHost];
+            Log(LOG_I, @"Repaired local pairState for %@ after host reported already paired",
+                self.selectedHost.uuid ?: self.selectedHost.displayName ?: @"");
+        }
+
+        [self transitionToAppsVCWithHost:self.selectedHost];
+    });
 }
 
 @end

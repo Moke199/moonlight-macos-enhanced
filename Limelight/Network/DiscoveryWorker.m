@@ -32,10 +32,6 @@ static const NSTimeInterval AUTO_SWITCH_COOLDOWN_SEC = 30.0;
 static NSMutableDictionary<NSString*, NSNumber*> *gAutoSwitchCooldownByHost = nil;
 static NSObject *gAutoSwitchCooldownLock = nil;
 static dispatch_once_t gAutoSwitchCooldownOnceToken;
-static const NSInteger PAIR_DOWNGRADE_CONFIRMATIONS_REQUIRED = 3;
-static NSMutableDictionary<NSString*, NSNumber*> *gUnpairedObservationCountByHost = nil;
-static NSObject *gUnpairedObservationLock = nil;
-static dispatch_once_t gUnpairedObservationOnceToken;
 
 - (id) initWithHost:(TemporaryHost*)host uniqueId:(NSString*)uniqueId {
     self = [super init];
@@ -197,8 +193,6 @@ static dispatch_once_t gUnpairedObservationOnceToken;
     __block double minLatency = DBL_MAX;
     __block NSString *bestAddress = nil;
     __block ServerInfoResponse *bestResp = nil;
-    __block BOOL sawExplicitPairedStatus = NO;
-    __block BOOL sawExplicitUnpairedStatus = NO;
 
     __weak typeof(self) weakSelf = self;
     for (NSString *address in filteredAddresses) {
@@ -226,14 +220,6 @@ static dispatch_once_t gUnpairedObservationOnceToken;
             [lock lock];
             if (success) {
                 receivedResponse = YES;
-                NSInteger rawPairStatus = 0;
-                if ([serverInfoResp getIntTag:TAG_PAIR_STATUS value:&rawPairStatus]) {
-                    if (rawPairStatus == 0) {
-                        sawExplicitUnpairedStatus = YES;
-                    } else {
-                        sawExplicitPairedStatus = YES;
-                    }
-                }
                 NSNumber *pingMs = [LatencyProbe icmpPingMsForAddress:address];
                 if (pingMs != nil) {
                     [latencies setObject:pingMs forKey:address];
@@ -306,51 +292,15 @@ static dispatch_once_t gUnpairedObservationOnceToken;
 
         [bestResp populateHost:_host];
 
-        // Guard against transient discovery responses falsely downgrading a paired host.
-        // Evaluate pair status across all successful responses in this poll cycle,
-        // not only the lowest-latency one, to avoid single-endpoint false downgrades.
+        // 发现轮询走的是无认证 HTTP（serverinfo 请求不带客户端证书），主机对
+        // 匿名请求永远返回 PairStatus=0，因此该值不能作为取消配对的证据。
+        // 已配对主机的配对状态只由配对/取消配对流程修改；否则每次断开串流后
+        // 主机都会被误标为「未配对」，再次连接时误入配对流程。
         if (hadPinnedCert && previousPairState == PairStatePaired) {
-            if (sawExplicitPairedStatus) {
-                _host.pairState = PairStatePaired;
-                dispatch_once(&gUnpairedObservationOnceToken, ^{
-                    gUnpairedObservationLock = [[NSObject alloc] init];
-                    gUnpairedObservationCountByHost = [NSMutableDictionary dictionary];
-                });
-                NSString *hostUUID = _host.uuid ?: @"";
-                @synchronized (gUnpairedObservationLock) {
-                    [gUnpairedObservationCountByHost removeObjectForKey:hostUUID];
-                }
-            } else if (!sawExplicitUnpairedStatus) {
-                if (_host.pairState != PairStatePaired) {
-                    Log(LOG_W, @"Ignoring pairState downgrade for %@ (missing PairStatus; keeping Paired)", _host.name);
-                }
-                _host.pairState = PairStatePaired;
-            } else {
-                dispatch_once(&gUnpairedObservationOnceToken, ^{
-                    gUnpairedObservationLock = [[NSObject alloc] init];
-                    gUnpairedObservationCountByHost = [NSMutableDictionary dictionary];
-                });
-
-                NSString *hostUUID = _host.uuid ?: @"";
-                NSInteger observationCount = 0;
-                @synchronized (gUnpairedObservationLock) {
-                    NSNumber *existing = gUnpairedObservationCountByHost[hostUUID];
-                    observationCount = existing.integerValue + 1;
-                    gUnpairedObservationCountByHost[hostUUID] = @(observationCount);
-                }
-
-                if (observationCount < PAIR_DOWNGRADE_CONFIRMATIONS_REQUIRED) {
-                    Log(LOG_W, @"Ignoring transient unpaired state for %@ (%ld/%ld confirmations)",
-                        _host.name,
-                        (long)observationCount,
-                        (long)PAIR_DOWNGRADE_CONFIRMATIONS_REQUIRED);
-                    _host.pairState = PairStatePaired;
-                } else {
-                    Log(LOG_I, @"Accepting Paired->Unpaired for %@ after %ld confirmations",
-                        _host.name,
-                        (long)observationCount);
-                }
+            if (_host.pairState != PairStatePaired) {
+                Log(LOG_W, @"Ignoring pairState downgrade for %@ (anonymous HTTP poll; keeping Paired)", _host.name);
             }
+            _host.pairState = PairStatePaired;
         }
 
         if (autoConnectionMode) {
