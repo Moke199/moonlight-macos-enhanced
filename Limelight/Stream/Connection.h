@@ -53,6 +53,8 @@ typedef struct {
 + (Connection *)currentConnection;
 
 @property(nonatomic, readonly) VideoDecoderRenderer *renderer;
+// 音频欠载累计计数（实时回调线程只递增，会话结束时统一读取输出）
+@property(nonatomic, readonly) unsigned long long audioUnderrunCount;
 
 - (id)initWithConfig:(StreamConfiguration *)config
                renderer:(VideoDecoderRenderer *)myRenderer

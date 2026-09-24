@@ -1074,15 +1074,18 @@ void ArDecodeAndPlaySample(char* sampleData, int sampleLength)
     }
 
     if (copiedFrames < frameCount) {
+        // 此函数运行在 CoreAudio/AudioQueue 实时渲染回调线程上。按 Apple 音频
+        // 规范，实时线程严禁加锁、正则、文件 IO（Logger 全都做了）。此前这里
+        // 每 25 次欠载打一条日志（欠载时即每 ~1.7s 一次），实测以 15 条/秒的
+        // 频率刷屏并在渲染线程上反复触发锁竞争，是输入/画面卡顿的来源之一。
+        // 现只递增计数器，欠载总量改由会话结束时的健康摘要统一输出。
         _audioUnderrunCount++;
-        if ((_audioUnderrunCount % 25) == 1) {
-            Log(LOG_W, @"Audio underrun on backend=%d requested=%u copied=%u entries=%d",
-                (int)_audioRendererBackend,
-                (unsigned int)frameCount,
-                (unsigned int)copiedFrames,
-                _audioBufferEntries);
-        }
     }
+}
+
+- (unsigned long long)audioUnderrunCount {
+    // uint64_t 在主流 64 位平台上的对齐读写是原子的，无需加锁
+    return _audioUnderrunCount;
 }
 
 - (void)downmixPCMFrames:(UInt32)frameCount

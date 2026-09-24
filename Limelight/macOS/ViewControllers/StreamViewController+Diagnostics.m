@@ -1146,7 +1146,7 @@
     BOOL statsFresh = statsTimestampValid && statsAgeMs <= 1500;
     NSString *rttLogText = [self currentLatencyLogSummary];
 
-    Log(LOG_I, @"[diag] Stream health summary (%@): payloadSeen=%d noPayloadStreak=%lu noDecodeStreak=%lu noRenderStreak=%lu highDropStreak=%lu rf=%u df=%u ren=%u total=%u dropped=%u bytes=%llu jitter=%.2fms rtt=%@ ageMs=%llu fresh=%d captured=%d input=%d",
+    Log(LOG_I, @"[diag] Stream health summary (%@): payloadSeen=%d noPayloadStreak=%lu noDecodeStreak=%lu noRenderStreak=%lu highDropStreak=%lu rf=%u df=%u ren=%u total=%u dropped=%u bytes=%llu jitter=%.2fms rtt=%@ ageMs=%llu fresh=%d captured=%d input=%d audioUnderruns=%llu",
         reason ?: @"unknown",
         self.streamHealthSawPayload ? 1 : 0,
         (unsigned long)self.streamHealthNoPayloadStreak,
@@ -1164,7 +1164,8 @@
         (unsigned long long)statsAgeMs,
         statsFresh ? 1 : 0,
         self.isMouseCaptured ? 1 : 0,
-        self.hidSupport.shouldSendInputEvents ? 1 : 0);
+        self.hidSupport.shouldSendInputEvents ? 1 : 0,
+        self.streamMan.connection.audioUnderrunCount);
 }
 
 - (void)requestStreamCloseWithSource:(NSString *)source {
